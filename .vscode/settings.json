@@ -1,0 +1,8 @@
+{
+    "java.configuration.updateBuildConfiguration": "interactive",
+    "java.import.maven.enabled": true,
+    "java.project.sourcePaths": [
+        "smartmall-backend/src/main/java",
+        "smartmall-backend/src/test/java"
+    ]
+}
