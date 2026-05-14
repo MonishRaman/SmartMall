@@ -1,16 +1,23 @@
 import { useEffect, useState } from "react";
 import ProductCard from "../../components/products/ProductCard";
+import ProductDetailModal from "../../components/products/ProductDetailModal";
 import productService from "../../services/productService";
+import cartService from "../../services/cartService";
+import { useAuth } from "../../hooks/useAuth";
 import { compactNumber, sortByDateDesc } from "../../utils/dashboardData";
 
 function Products() {
+	const { user } = useAuth();
 	const [products, setProducts] = useState([]);
+	const [selectedProduct, setSelectedProduct] = useState(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState("");
+	const [success, setSuccess] = useState("");
 
 	const loadProducts = async () => {
 		setLoading(true);
 		setError("");
+		setSuccess("");
 
 		try {
 			const { data } = await productService.list();
@@ -20,6 +27,26 @@ function Products() {
 		} finally {
 			setLoading(false);
 		}
+	};
+
+	const handleAddToCart = async (product) => {
+		if (!user?.id) {
+			setError("Please log in to add items to your cart.");
+			return;
+		}
+		setError("");
+		setSuccess("");
+
+		try {
+			await cartService.addItem({ userId: user.id, productId: product.id, quantity: 1 });
+			setSuccess(`Added ${product.name} to cart.`);
+		} catch (addError) {
+			setError(addError?.response?.data?.message || "Unable to add product to cart.");
+		}
+	};
+
+	const handleViewDetails = (product) => {
+		setSelectedProduct(product);
 	};
 
 	useEffect(() => {
@@ -45,13 +72,27 @@ function Products() {
 			</section>
 
 			{error ? <p className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</p> : null}
+			{success ? <p className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{success}</p> : null}
 			{loading ? <p className="rounded-3xl border border-white/10 bg-white/5 p-6 text-sm text-slate-300">Loading products...</p> : null}
 
 			<div className="grid gap-4 lg:grid-cols-2">
 				{liveProducts.map((product) => (
-					<ProductCard key={product.id} product={product} />
+					<ProductCard
+						key={product.id}
+						product={product}
+						onAddToCart={handleAddToCart}
+						onViewDetails={handleViewDetails}
+					/>
 				))}
 			</div>
+
+			{selectedProduct ? (
+				<ProductDetailModal
+					product={selectedProduct}
+					onClose={() => setSelectedProduct(null)}
+					onAddToCart={handleAddToCart}
+				/>
+			) : null}
 		</div>
 	);
 }

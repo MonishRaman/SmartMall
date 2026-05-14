@@ -7,7 +7,6 @@ import VisitorChart from "../../components/dashboard/VisitorChart";
 import ProductCard from "../../components/products/ProductCard";
 import { useAuth } from "../../hooks/useAuth";
 import orderService from "../../services/orderService";
-import paymentService from "../../services/paymentService";
 import productService from "../../services/productService";
 import { buildWeeklySeries, compactNumber, percent, sumBy } from "../../utils/dashboardData";
 import { formatCurrency } from "../../utils/formatCurrency";
@@ -16,24 +15,35 @@ function ShopDashboard() {
 	const { user } = useAuth();
 	const [products, setProducts] = useState([]);
 	const [orders, setOrders] = useState([]);
-	const [payments, setPayments] = useState([]);
 
 	useEffect(() => {
-		Promise.all([productService.list(user?.shopId), orderService.list(), paymentService.list()])
-			.then(([productsResponse, ordersResponse, paymentsResponse]) => {
+		Promise.all([productService.list(user?.shopId), orderService.list()])
+			.then(([productsResponse, ordersResponse]) => {
 				setProducts(productsResponse.data || []);
 				setOrders(ordersResponse.data || []);
-				setPayments(paymentsResponse.data || []);
 			})
 			.catch(() => undefined);
 	}, [user?.shopId]);
 
-	const revenue = sumBy(payments, (payment) => payment.amount);
-	const deliveredOrders = orders.filter((order) => String(order.status || "").toUpperCase() === "DELIVERED").length;
+	const shopOrderItems = orders.flatMap((order) =>
+		(order.items || []).filter(
+			(item) => item.product?.shop?.id === user?.shopId,
+		),
+	);
+
+	const shopOrders = orders.filter((order) =>
+		(order.items || []).some((item) => item.product?.shop?.id === user?.shopId),
+	);
+
+	const shopRevenue = sumBy(shopOrderItems, (item) => Number(item.unitPrice || 0) * Number(item.quantity || 0));
+	const deliveredOrders = shopOrders.filter((order) => String(order.status || "").toUpperCase() === "DELIVERED").length;
 	const lowStockCount = products.filter((product) => Number(product.stockQuantity || 0) <= 10).length;
-	const averageTicket = orders.length ? revenue / orders.length : 0;
-	const revenueSeries = buildWeeklySeries(payments, "paidAt", (payment) => payment.amount, "revenue");
-	const orderSeries = buildWeeklySeries(orders, "orderedAt", () => 1, "visitors");
+	const averageTicket = shopOrders.length ? shopRevenue / shopOrders.length : 0;
+	const revenueSeries = buildWeeklySeries(shopOrders, "orderedAt", (order) =>
+		sumBy((order.items || []).filter((item) => item.product?.shop?.id === user?.shopId), (item) => Number(item.unitPrice || 0) * Number(item.quantity || 0)),
+		"revenue",
+	);
+	const orderSeries = buildWeeklySeries(shopOrders, "orderedAt", () => 1, "visitors");
 	const displayProducts = products.slice(0, 6);
 
 	return (
@@ -50,8 +60,8 @@ function ShopDashboard() {
 					<div className="grid gap-3 sm:grid-cols-2">
 						<div className="rounded-3xl border border-white/10 bg-white/5 p-4">
 							<p className="text-sm text-slate-400">Revenue</p>
-							<h3 className="mt-2 text-2xl font-semibold text-white">{formatCurrency(revenue)}</h3>
-							<p className="mt-2 text-sm text-slate-400">{compactNumber(payments.length)} payments captured</p>
+							<h3 className="mt-2 text-2xl font-semibold text-white">{formatCurrency(shopRevenue)}</h3>
+							<p className="mt-2 text-sm text-slate-400">Revenue from your shop items</p>
 						</div>
 						<div className="rounded-3xl border border-white/10 bg-white/5 p-4">
 							<p className="text-sm text-slate-400">Inventory</p>
@@ -60,23 +70,23 @@ function ShopDashboard() {
 						</div>
 						<div className="rounded-3xl border border-white/10 bg-white/5 p-4">
 							<p className="text-sm text-slate-400">Orders</p>
-							<h3 className="mt-2 text-2xl font-semibold text-white">{compactNumber(orders.length)}</h3>
-							<p className="mt-2 text-sm text-slate-400">Live order history from the database</p>
+							<h3 className="mt-2 text-2xl font-semibold text-white">{compactNumber(shopOrders.length)}</h3>
+							<p className="mt-2 text-sm text-slate-400">Orders containing your products</p>
 						</div>
 						<div className="rounded-3xl border border-white/10 bg-white/5 p-4">
 							<p className="text-sm text-slate-400">Fulfillment</p>
-							<h3 className="mt-2 text-2xl font-semibold text-white">{percent(deliveredOrders, orders.length)}</h3>
-							<p className="mt-2 text-sm text-slate-400">Delivered order share</p>
+							<h3 className="mt-2 text-2xl font-semibold text-white">{percent(deliveredOrders, shopOrders.length)}</h3>
+							<p className="mt-2 text-sm text-slate-400">Delivered order share for your shop</p>
 						</div>
 					</div>
 				</div>
 			</section>
 
 			<section className="grid gap-4 md:grid-cols-4">
-				<DashboardCard title="Sales" value={formatCurrency(revenue)} subtitle="Live from payment records" icon={FiDollarSign} accent="teal" />
+				<DashboardCard title="Sales" value={formatCurrency(shopRevenue)} subtitle="Shop-specific revenue" icon={FiDollarSign} accent="teal" />
 				<DashboardCard title="Products" value={compactNumber(products.length)} subtitle="Active catalog" icon={FiPackage} accent="amber" />
-				<DashboardCard title="Orders" value={compactNumber(orders.length)} subtitle="Pending and fulfilled" icon={FiShoppingCart} accent="cyan" />
-				<DashboardCard title="Growth" value={percent(deliveredOrders, orders.length)} subtitle="Fulfilled order rate" icon={FiTrendingUp} accent="violet" />
+				<DashboardCard title="Orders" value={compactNumber(shopOrders.length)} subtitle="Orders containing shop items" icon={FiShoppingCart} accent="cyan" />
+				<DashboardCard title="Growth" value={percent(deliveredOrders, shopOrders.length)} subtitle="Delivered share" icon={FiTrendingUp} accent="violet" />
 			</section>
 
 			<section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
@@ -86,10 +96,10 @@ function ShopDashboard() {
 
 			<AnalyticsWidget
 				items={[
-					{ label: "Average ticket", value: formatCurrency(averageTicket), description: "Mean order value from live orders" },
+					{ label: "Average ticket", value: formatCurrency(averageTicket), description: "Mean order value for your shop" },
 					{ label: "Low stock", value: compactNumber(lowStockCount), description: "Products at or below 10 units" },
-					{ label: "Fulfillment", value: percent(deliveredOrders, orders.length), description: "Delivered order share" },
-					{ label: "Revenue", value: formatCurrency(revenue), description: "Captured payment amount" },
+					{ label: "Fulfillment", value: percent(deliveredOrders, shopOrders.length), description: "Delivered order percentage" },
+					{ label: "Revenue", value: formatCurrency(shopRevenue), description: "Revenue from shop orders" },
 				]}
 			/>
 
